@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const fs = require('fs');
 const app = express();
 const port = process.env.PORT;
 const execSync = require('child_process').execSync;
@@ -55,18 +56,18 @@ app.get('/api/branches', async (req, res) => {
 
 
 app.get('/api/envs', async (req, res) => {
-  const envs = [
-    { name: 'tartemeva', branch: 'master'},
-    { name: 'abataloff', branch: 'master'},
-    { name: 'apavlova', branch: 'master'},
-    { name: 'dmarkov', branch: 'master'},
-    { name: 'h1', branch: 'master'},
-    { name: 'h2', branch: 'master'},
-    { name: 'h3', branch: 'master'},
-    { name: 'h4', branch: 'master'},
-    { name: 'h5', branch: 'master'},
-    { name: 'h6', branch: 'master'},
-  ]
+  const envsList = (process.env.ENVS || '').split(';');
+  let envs = [];
+
+  try {
+    envs = envsList.map(name => ({
+      name,
+      branch: fs.existsSync('./runtime/builds/' + name) ? fs.readFileSync('./runtime/builds/' + name, 'utf8') : '-',
+    }));
+  } catch (err) {
+    res.status(400);
+    console.error(err);
+  }
   res.send({ data: envs });
 });
 
