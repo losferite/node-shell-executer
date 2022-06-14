@@ -3,12 +3,24 @@ const express = require('express');
 const fs = require('fs');
 const app = express();
 const port = process.env.PORT;
-const execSync = require('child_process').execSync;
+const { fork, execSync } = require('child_process');
 
 const execCommand = (command, cb) => execSync(command);
 const state = {
   isBranchDeploying: false,
+  lastDeploy: {
+    result: null,
+    branch: null,
+    envName: null,
+  },
 };
+
+const child = fork(__dirname + '/scripts/spawn-branch');
+
+child.on('message', (message) => {
+  state.isBranchDeploying = false;
+  state.lastDeploy.result = message
+});
 
 app.get('/api/status', (req, res) => {
   res.send(state);
@@ -18,21 +30,10 @@ app.get('/api/branch', async (req, res) => {
   const branch = req.query.id;
   const envName = req.query.env;
 
-  if (!branch) {
-    res.status(400).send({ data: '', error: 'Branch name is required' });
-  }
-
-  const command = `cd ~/docker-c2m && sudo ./exec.sh -env=abataloff -build-version=${branch} -bwa && sudo ./exec.sh -env=${envName} -build-version=${branch} -d -m`;
   state.isBranchDeploying = true;
-  try {
-    const result = await execCommand(command);
-
-    state.isBranchDeploying = false;
-    res.send({ data: result.toString() });
-  } catch (e) {
-    state.isBranchDeploying = false;
-    res.status(400).send({ e })
-  }
+  state.lastDeploy = { branch, envName, result: null};
+  child.send(`START;${branch};${envName}`);
+  res.send({ result: true })
 });
 
 app.get('/api/branches', async (req, res) => {
@@ -60,13 +61,19 @@ app.get('/api/envs', async (req, res) => {
   let envs = [];
 
   try {
-    envs = envsList.map(name => ({
-      name,
-      branch: fs.existsSync('./runtime/builds/' + name) ? fs.readFileSync('./runtime/builds/' + name, 'utf8') : '-',
-    }));
+    envs = envsList.map(name => {
+      const filePath = './runtime/builds/' + name;
+      const fileExist = fs.existsSync(filePath);
+      const stats = fileExist ? fs.statSync(filePath) : null
+
+      return {
+        name,
+        branch: fileExist ? fs.readFileSync(filePath, 'utf8') : '-',
+        changeTime: stats?.mtime,
+      };
+    });
   } catch (err) {
     res.status(400);
-    console.error(err);
   }
   res.send({ data: envs });
 });
